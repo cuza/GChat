@@ -1,0 +1,1146 @@
+// Parley's minimal Dynamite schema: only messages Parley uses.
+// Field numbers match current Google Chat traffic (2026-09) and purple-googlechat-cli @03eebe1.
+// "(purple)" = known only from purple-googlechat.
+// Regenerate: protoc --proto_path=Proto --swift_out=Parley/Dynamite/Proto Proto/dynamite.proto
+syntax = "proto2";
+package dynamite;
+
+message RequestHeader {
+  enum ClientType { UNKNOWN = 0; ANDROID = 1; IOS = 2; WEB = 3; }
+  optional int64 trace_id = 1;
+  optional ClientType client_type = 2;
+  optional ClientFeatureCapabilities client_feature_capabilities = 5;
+}
+/// What the client can render, as Google Chat's web client declares it (see DynamiteClient.webCapabilities, which sends
+/// about fifty fields from their wire form). Declaring a list switches off every field it leaves out.
+message ClientFeatureCapabilities {
+  enum State { STATE_UNSPECIFIED = 0; STATE_DATA_SUPPORTED = 1; STATE_FULLY_SUPPORTED = 2; }
+  optional State capability_17 = 17;  // opens the history of some personal-account DMs
+}
+
+message UserId {
+  optional string id = 1;
+  enum UserType { HUMAN = 0; BOT = 1; WS_AGENT = 2; }
+  optional UserType type = 2;
+  optional string acting_user_id = 4;  // a person's id: the app (a BOT user id) that posted on their behalf
+}
+message User {
+  optional UserId user_id = 1;
+  optional string name = 2;          // (purple)
+  optional string avatar_url = 3;    // FIFE URL, may be scheme-relative
+  optional string email = 4;
+}
+
+message SpaceId { optional string space_id = 1; }
+message DmId { optional string dm_id = 1; }
+message GroupId {
+  optional SpaceId space_id = 1;
+  optional DmId dm_id = 3;
+}
+message TopicId {
+  optional string topic_id = 2;
+  optional GroupId group_id = 3;
+}
+message MessageParentId { optional TopicId topic_id = 4; }
+message MessageId {
+  optional MessageParentId parent_id = 1;
+  optional string message_id = 2;
+}
+
+message CustomerId { optional string customer_id = 1; }
+// A Workspace organisation's own emoji, as Google Chat sends it in text and reactions.
+message CustomEmoji {
+  enum State { STATE_UNSPECIFIED = 0; ENABLED = 1; SYSTEM_DISABLED = 2; HIDDEN = 3; DELETED = 4; }
+  optional string uuid = 1;
+  optional string shortcode = 3;                      // without colons
+  optional State state = 4;
+  optional UserId creator_user_id = 5;
+  optional CustomerId owner_customer_id = 6;
+  optional string blob_id = 7;
+  optional int64 create_time_micros = 8;
+  optional string read_token = 9;                     // fetches the image: api/get_custom_emoji_image
+  optional int64 update_time_micros = 10;
+  optional string ephemeral_url = 11;
+  optional string content_type = 12;
+  optional int64 delete_time_micros = 13;
+}
+message CustomEmojiMetadata { optional CustomEmoji custom_emoji = 1; }
+// list_custom_emojis: the organisation's emoji, a page at a time. Google Chat sends filters on the first page only.
+message ListCustomEmojisRequest {
+  message Filter {
+    message States { repeated CustomEmoji.State states = 1; }
+    optional int32 kind = 1;                          // what the filter applies to: 2 or 3, as Google Chat sends them
+    optional States states = 2;
+    optional int32 operation = 3;                     // 1
+  }
+  repeated Filter filters = 1;
+  optional int32 page_size = 2;
+  optional string page_token = 3;
+  optional RequestHeader request_header = 100;
+}
+message ListCustomEmojisResponse {
+  repeated CustomEmoji custom_emojis = 1;
+  optional string next_page_token = 2;
+}
+message Emoji {
+  oneof content {
+    string unicode = 1;
+    CustomEmoji custom_emoji = 2;
+  }
+}
+message AvatarInfo { optional Emoji emoji = 1; }      // a space's emoji icon
+message Reaction {
+  optional Emoji emoji = 1;
+  optional int32 count = 2;
+  optional bool current_user_reacted = 3;
+}
+// --- Attachments ---
+message SafeUrl { optional string url = 3; }
+message Dimension {
+  optional int32 width = 1;
+  optional int32 height = 2;
+}
+message DriveMetadata {
+  optional string id = 1;
+  optional string title = 2;
+  optional string thumbnail_url = 3;
+  optional string mimetype = 4;
+  optional int32 thumbnail_width = 7;
+  optional int32 thumbnail_height = 8;
+}
+message UrlMetadata {
+  optional string title = 1;
+  optional string snippet = 2;
+  optional string image_url = 3;
+  optional SafeUrl url = 7;
+  optional string domain = 8;
+  optional bool should_not_render = 9;
+  optional int32 int_image_height = 10;
+  optional int32 int_image_width = 11;
+  optional string mime_type = 12;
+  enum UrlSource { URL_SOURCE_UNKNOWN = 0; SERVER_SUPPLIED_POLICY_VIOLATION = 2; AUTO_DETECTED_PLAIN_TEXT = 3; RICH_TEXT = 4; }
+  optional UrlSource url_source = 16;
+}
+message UploadMetadata {
+  optional string attachment_token = 1;               // oneof payload; fetched via api/get_attachment_url
+  optional string content_name = 3;
+  optional string content_type = 4;
+  optional Dimension original_dimension = 5;
+  optional VoiceMessageMetadata voice_message_metadata = 18;   // a recorded voice message (oneof with a video message's, 19)
+  optional string transcript = 20;                    // added by the server once it has transcribed a voice message
+  optional int32 transcription_status = 22;           // 0 DEFAULT, 1 TRANSCRIPT_UNAVAILABLE, 2 TRANSCRIBING_FAILED, 3 TRANSCRIBED
+}
+message VoiceMessageMetadata {
+  optional Duration duration = 1;
+  repeated int32 waveform = 2 [packed = true];        // one 0…100 level per 100 ms of audio
+}
+message Duration { optional int64 seconds = 1; optional int32 nanos = 2; }
+message InteractionData { optional SafeUrl url = 1; } // the chip's open link
+// --- Formatting ---
+message UserMentionMetadata {
+  optional UserId id = 1;
+  enum MentionType { TYPE_UNSPECIFIED = 0; INVITE = 1; UNINVITE = 2; MENTION = 3; MENTION_ALL = 4; FAILED_TO_ADD = 5; REFERENCE = 6; }
+  optional MentionType type = 2;
+  optional InviteeInfo invitee_info = 3;
+  optional string display_name = 4;
+}
+message InviteeInfo {
+  optional UserId user_id = 1;
+  optional string email = 2;
+  optional int32 invitation_mode = 3;   // create_dm only: 1 GAIA_ID, 2 EMAIL_ONLY, 3 EMAIL_OR_GUESTPASS
+}
+message ListMetadata {                                // names ours
+  optional int32 list_type = 1;                       // 2 = numbered (medium)
+  optional int32 nesting_level = 2;                   // 0…4
+}
+message FormatMetadata {
+  enum FormatType {                                   // complete
+    TYPE_UNSPECIFIED = 0; BOLD = 1; ITALIC = 2; STRIKE = 3; SOURCE_CODE = 4; MONOSPACE = 5;
+    HIDDEN = 6; MONOSPACE_BLOCK = 7; UNDERLINE = 8; FONT_COLOR = 9; BULLETED_LIST = 10; BULLETED_LIST_ITEM = 11;
+    CLIENT_HIDDEN = 12; SEARCH_HIGHLIGHT = 13; QUOTE_BLOCK = 15; TABLE_CELL = 16; HEADING = 17;
+  }
+  optional FormatType format_type = 1;
+  optional uint32 font_color = 2;                     // ARGB
+  optional ListMetadata list = 3;
+}
+message ActivityMetadata {
+  message Entry { optional string title = 1; optional string content = 2; }
+  message Log { repeated Entry entries = 1; }
+  optional Log log = 1;
+}
+// A Gemini answer's sources. Zero-length annotations each list sources for the answer's "N Sources" row; a ranged one
+// (with a citation id) names the sources of the text it covers.
+message ContextSourceMetadata {
+  optional string citation_id = 1;
+  repeated ContextSource sources = 2;
+}
+message ContextSource {
+  enum Kind { UNSPECIFIED = 0; DOCS = 1; SHEETS = 2; SLIDES = 3; DRIVE = 4; CALENDAR = 5; YOUTUBE = 6; PDF = 7; VIDEO = 8;
+    AUDIO = 9; IMAGE = 10; GMAIL = 11; PROJECT = 12; AIFP = 13; CHAT = 14; TASKS = 15; }
+  optional string title = 2;      // an email's subject, an event's title
+  optional string url = 3;        // the source on the web
+  optional string icon_url = 6;   // a site's favicon, for a kind with no icon of its own
+  optional Kind kind = 7;
+}
+message Annotation {                                  // the oneof case, not type(1), picks the kind
+  enum Type {                                         // complete
+    TYPE_UNSPECIFIED = 0; URL = 1; DRIVE_FILE = 2; DRIVE_DOC = 3; DRIVE_SHEET = 4; DRIVE_SLIDE = 5; USER_MENTION = 6;
+    VIDEO = 7; FORMAT_DATA = 8; IMAGE = 9; PDF = 10; VIDEO_CALL = 11; MEMBERSHIP_CHANGED = 12; UPLOAD_METADATA = 13;
+    ROOM_UPDATED = 14; INVITATION = 15; SLASH_COMMAND = 16; GSUITE_INTEGRATION = 17; DRIVE_FORM = 18;
+    GROUP_RETENTION_SETTINGS_UPDATED = 19; BABEL_PLACEHOLDER = 20; READ_RECEIPTS_SETTINGS_UPDATED = 21;
+    INCOMING_WEBHOOK_CHANGED = 22; INTEGRATION_CONFIG_UPDATED = 23; CONSENTED_APP_UNFURL = 24; CUSTOM_EMOJI = 25;
+    CARD_CAPABILITY = 26; DATA_LOSS_PREVENTION = 27; REQUIRED_MESSAGE_FEATURES_METADATA = 28;
+    MIGRATED_FROM_LEGACY_THREADED_ROOM = 29; GROUP = 30; EMAIL = 31; GEN_AI_INTENT = 32;
+    CHAT_MESSAGES_VISIBLE_IN_MEET = 33; CONTEXT_SOURCE = 34; FORCED_NOTIFY = 35; SILENT = 36; AGENT_MENTION = 37;
+    AGENT_TURN_METADATA = 38; ACTIVITY = 39; DISABLE_NOTIFY = 40; NOTEBOOKLM = 41; MEETING_CARD = 42; STATUS = 43;
+    TOPIC_UPDATED = 44;
+  }
+  optional Type type = 1;
+  optional int32 start_index = 2;                     // UTF-16 code units into text_body
+  optional int32 length = 3;
+  oneof metadata {
+    DriveMetadata drive_metadata = 4;
+    UserMentionMetadata user_mention_metadata = 5;
+    UrlMetadata url_metadata = 7;
+    FormatMetadata format_metadata = 8;
+    UploadMetadata upload_metadata = 10;
+    MembershipChangedMetadata membership_changed = 11;
+    RoomUpdatedMetadata room_updated = 14;
+    CustomEmojiMetadata custom_emoji_metadata = 26;   // CUSTOM_EMOJI: one U+FFFD in text_body, length 1
+    GroupMetadata group_metadata = 33;                // a chip linking to a space or DM
+    RequiredMessageFeaturesMetadata required_message_features_metadata = 28;   // REQUIRED_MESSAGE_FEATURES_METADATA
+    GsuiteIntegrationMetadata gsuite_integration_metadata = 16;   // GSUITE_INTEGRATION: a Google Meet call, among others
+    VideoCallMetadata video_call_metadata = 12;   // VIDEO_CALL: a Google Meet link
+    ContextSourceMetadata context_source_metadata = 37;   // CONTEXT_SOURCE: a Gemini answer's sources
+    ActivityMetadata activity_metadata = 43;              // ACTIVITY: the steps behind a Gemini answer ("Show thinking")
+  }
+  enum ChipRenderType { UNKNOWN = 0; RENDER = 1; RENDER_IF_POSSIBLE = 2; DO_NOT_RENDER = 3; }
+  optional ChipRenderType chip_render_type = 20;
+  optional int32 inline_render_format = 29;           // 1 = keep as an inline link, no chip
+  optional InteractionData interaction_data = 30;
+}
+message GroupMetadata {                               // GROUP: the annotated text is the conversation's name
+  optional GroupId group_id = 1;
+  optional MessageId message_id = 2;                  // the message the pasted link named, when it named one
+  optional AvatarInfo avatar_info = 3;
+}
+// What a client must support to show the message as sent; Google Chat's composer names GROUP_SMART_CHIP (6) for a
+// space chip. 1 QUOTING, 2 TOMBSTONES_IN_DMS, 3 CUSTOM_HYPERLINK, 4 DRIVE_SMART_CHIP, 5 LEGACY_TOPIC_START,
+// 6 GROUP_SMART_CHIP, 7 EMAIL_SMART_CHIP, 8 FORWARDING, 9 BLOCK_QUOTE, 10 CONTEXT_SOURCE, 11 NOTIFY_AND_SILENT,
+// 12 EMAIL_PREVIEW_CHIP, 13 NESTED_LISTS, 14 NUMBERED_LISTS, 15 TABLES.
+message RequiredMessageFeaturesMetadata { repeated int32 required_features = 1 [packed = true]; }
+// --- System messages ---
+message MembershipChangedMetadata {
+  enum Type {                                         // (partial: 13–19 are Meet interop and trust checks)
+    TYPE_UNSPECIFIED = 0; INVITED = 1; JOINED = 2; ADDED = 3; REMOVED = 4; LEFT = 5; BOT_ADDED = 6; BOT_REMOVED = 7;
+    KICKED_DUE_TO_OTR_CONFLICT = 8; ROLE_UPDATED = 9; ROLE_TARGET_AUDIENCE_UPDATED = 10; SPACE_LIMIT_EXCEEDED = 11;
+    HUMAN_MEMBERSHIP_DISPLAY_DISABLED = 12;
+  }
+  optional Type type = 1;
+  optional UserId initiator = 2;
+  repeated MemberId affected_members = 3;
+  repeated Member affected_member_profiles = 5;       // may carry names
+}
+message RoomRenameMetadata {
+  optional string new_name = 1;
+  optional string prev_name = 2;
+}
+message GroupDetails {
+  optional string description = 1;
+  optional string guidelines = 2;
+}
+message GroupDetailsUpdatedMetadata {
+  optional GroupDetails new_group_details = 1;
+  optional GroupDetails prev_group_details = 2;
+}
+message RoomUpdatedMetadata {                         // purple's name(2) is gone
+  optional User initiator = 4;
+  optional RoomRenameMetadata rename_metadata = 6;
+  optional GroupDetailsUpdatedMetadata group_details_metadata = 7;
+  optional int32 initiator_type = 8;                  // enum; 2 = an admin (named nowhere), 1 = a member
+}
+message QuotedMessageMetadata {
+  optional MessageId message_id = 1;
+  optional User creator = 5;
+  optional string text_body = 6;
+  repeated Annotation annotations = 7;
+  optional QuotedMessageRef.QuoteType quote_type = 15;   // FORWARD on a forwarded message
+  optional QuotedGroup group = 17;                       // a forward: the conversation it came from
+}
+message QuotedGroup {
+  optional GroupId group_id = 1;
+  optional string name = 5;                              // empty for a DM
+}
+message Message {
+  optional MessageId id = 1;
+  optional User creator = 2;
+  optional int64 create_time = 3;     // µs
+  optional int64 last_update_time = 4; // µs; a quote reply sends it back to name the version quoted
+  optional int64 delete_time = 8;     // µs, > 0 = deleted
+  optional string text_body = 10;
+  repeated Annotation annotations = 11;
+  repeated AppAttachment app_attachments = 15;   // cards from apps and integrations
+  optional string local_id = 14;
+  optional int64 last_edit_time = 17; // µs
+  repeated Reaction reactions = 21;
+  enum MessageType { MESSAGE_TYPE_UNSPECIFIED = 0; USER_MESSAGE = 1; SYSTEM_MESSAGE = 2; USER_STREAMING_PLACEHOLDER = 3; }
+  optional MessageType message_type = 28;
+  optional QuotedMessageMetadata quoted_message_metadata = 37;
+  optional int32 rich_text_formatting_type = 40;      // analytics only, kept for diagnostics
+  optional ShortcutSource shortcut_source = 42;       // on a copy in a shortcut's hidden space: the original message
+  repeated MessageLabel message_labels = 43;
+  repeated BotResponse bot_responses = 19;            // an app that couldn't answer: not responding, or needs configuring
+  optional Tombstone tombstone = 31;                  // deleted, shown in its place
+  optional TombstoneMetadata tombstone_metadata = 32; // who deleted it
+  repeated PrivateMessageViewer private_message_viewers = 35;   // only these people see it          // my labels on it: STAR when I starred it
+  optional Translation translation = 47;            // Google's translation of the text, for me
+  optional bytes encrypted_content = 50;              // client-side-encrypted content; not drawn, only reported
+}
+message ShortcutSource { optional ShortcutSourceRef ref = 1; }
+message ShortcutSourceRef { optional MessageId message_id = 1; optional int32 kind = 2; }   // kind: 1 seen on both shortcuts
+// A per-user label on a message (apply_message_label / remove_message_label).
+message MessageLabel {
+  enum Type { LABEL_TYPE_UNDEFINED = 0; STAR = 1; PINNED = 2; HASHTAG = 3; MENTIONED_ME = 4;
+              REACTED_TO_ME = 5; MENTIONED_ALL = 6; MEETING_RECAP = 7; SYSTEM_MESSAGE = 8; UNREAD = 9; }
+  optional Type type = 1;
+  optional string secondary_key = 2;
+}
+message MessageLabelRequest {                         // apply_message_label and remove_message_label
+  optional MessageId message_id = 1;
+  optional MessageLabel label = 2;
+  optional RequestHeader request_header = 100;
+}
+message ApplyMessageLabelResponse {}                  // the revision (1) and the labels now on the message (2) are not used
+message RemoveMessageLabelResponse {}
+message ReplySummary { optional int64 total_reply_count = 1; }
+message TopicReadState {               // only sent with fetch option TOPIC_METADATA (and on Home's thread items)
+  optional int64 last_read_time = 2;   // µs; a message created later is unread
+  optional int32 message_count = 10;
+  optional ReplySummary reply_summary = 13;
+  repeated TopicLabelId topic_label_id = 11;
+}
+// A per-user label on a thread; THREAD_FOLLOWED means I follow it.
+message TopicLabelId {
+  enum Type { LABEL_TYPE_UNSPECIFIED = 0; THREAD_FOLLOWED = 1; THREAD_UNREAD = 2; }
+  optional Type type = 1;
+  optional string secondary_key = 2;
+}
+message Topic {
+  optional TopicId id = 1;
+  optional int64 sort_time = 2;
+  repeated Message replies = 7;        // newest page only
+  optional TopicReadState topic_read_state = 11;
+}
+
+message GroupReadState {
+  optional int64 last_read_time = 2;                 // µs
+  optional int64 unread_message_count = 4;           // (purple) absent today; kept for older servers
+  optional bool starred = 5;
+  optional int64 unread_subscribed_topic_count = 7;
+  optional GroupNotificationSettings notification_settings = 12;
+  optional int64 mark_as_unread_timestamp = 18;      // µs
+  optional int64 last_head_message_create_time = 29; // µs
+}
+// Mute is its own setting next to the notification level; a mute change resends the current level.
+message GroupNotificationSettings {
+  enum Level {
+    NOTIFY_ALWAYS = 0; NOTIFY_LESS_WITH_NEW_THREADS = 1; NOTIFY_LESS = 2; NOTIFY_NEVER = 3;
+    NOTIFY_FOR_MAIN_CONVERSATIONS_WITH_AUTOFOLLOW = 4; NOTIFY_FOR_MAIN_CONVERSATIONS = 5;
+  }
+  enum MuteState { MUTE_STATE_UNSPECIFIED = 0; UNMUTED = 1; MUTED = 2; }
+  message MuteSettings { optional MuteState state = 1; }
+  optional Level level = 2;                  // purple's state(1) is gone
+  optional MuteSettings mute_settings = 3;
+}
+message NameUsers {                    // (purple)
+  repeated UserId users = 1;
+  optional string group_name = 3;
+}
+message DmMembers { repeated UserId members = 1; }  // (purple)
+message WorldItemLite {
+  optional GroupId group_id = 1;
+  optional int64 sort_timestamp = 3;
+  optional GroupReadState read_state = 4;
+  optional string room_name = 5;
+  optional DmMembers dm_members = 6;
+  message GroupLite {
+    optional GroupDetails space_details = 8;   // a space's description and guidelines
+  }
+  optional GroupLite group_lite = 7;
+  optional string avatar_url = 16;    // uploaded or monogram space image
+  optional AvatarInfo avatar_info = 18; // space emoji, shown before avatar_url
+  optional int32 group_type = 19;      // 2 a 1:1 DM with an app, 6 with a person, 4 a group DM or flat space, 11 Ask Gemini's session DM, 9 a shortcut
+  optional NameUsers name_users = 20;
+  repeated GroupAttribute attributes = 36;   // "SPACE" or "GROUP_DM" (a group DM, named or not); absent on 1:1 DMs
+}
+message GroupAttribute {
+  optional int32 type = 1;    // 6 = what kind of conversation the value names
+  optional string value = 2;
+}
+// Which conversations a section holds. Only the fields Parley sends; Google Chat also filters on
+// starred(1), visibility(2), member type(5), read(7), blocked(8), named(9), mute(12) and labels(15/16).
+message WorldFilter {
+  enum InviteCategory { UNKNOWN_INVITE = 0; REGULAR_INVITE = 1; SPAM_INVITE = 2; }
+  enum GroupType { GROUP_TYPE_UNSPECIFIED = 0; DM = 1; ROOM = 2; }
+  optional Membership.State membership_state = 3;
+  optional InviteCategory invite_category = 4;
+  optional GroupType group_type = 6;
+  enum ShortcutType { SHORTCUT_TYPE_UNSPECIFIED = 0; MENTIONS = 1; STARRED = 2; }
+  repeated ShortcutType shortcut_types = 11 [packed = true];   // a Mentions or Starred shortcut section
+  // Home's sections, as Google Chat sends them. Enum names partly unknown, so raw values.
+  message Label { optional int32 type = 1; optional string key = 2; }   // type: MUTED 3, HAS_UNREAD_MAIN_MESSAGE 5
+  optional int32 read_state = 7;           // 4 on Home's unread section
+  optional int32 mute_state = 12;          // 1 UNMUTED
+  repeated Label include_labels = 15;
+  repeated Label exclude_labels = 16;
+  optional bool flag_17 = 17;              // meaning unknown
+}
+// Which threads a Home section lists.
+message WorldTopicFilter {
+  message TopicLabel { optional int32 type = 1; optional string key = 2; }
+  optional int32 field_1 = 1;              // 1 on the unread variant
+  repeated TopicLabel labels = 2;
+  optional bool field_4 = 4;
+}
+message WorldTopicOption {
+  message Page { optional int32 field_1 = 1; optional bool field_2 = 2; }
+  message Flag { optional bool field_1 = 1; }
+  optional Page page = 1;
+  optional Flag flag = 2;
+}
+message WorldSortKey { optional int32 sort = 1; optional string token = 2; }   // sort: SORT_BY_SORT_TIME_DESC 1
+message WorldView { optional int32 view = 1; }                                 // view: HOME 1
+message WorldSectionRequest {
+  optional int32 page_size = 1;
+  optional WorldFilter world_filter = 4;
+  optional string pagination_token = 6;
+  optional int32 field_7 = 7;            // 2 on a shortcut section's first page, as Google Chat sends it (meaning unknown)
+  optional WorldTopicFilter topic_filter = 9;
+  optional WorldTopicOption topic_option = 10;
+  optional WorldSortKey sort_key = 11;
+  optional WorldView view = 15;
+  optional WorldConstraints constraints = 16;   // Home's followed-thread section: label "100G" (see homeSections)
+}
+// A small expression language: a binary operation on two values, or a string.
+message WorldExpression {
+  oneof value { WorldBinaryExpression binary = 5; string text = 8; }
+}
+message WorldBinaryExpression {
+  optional int32 op = 1;                 // 2 in Home's "label" = "100G" filter
+  optional WorldExpression left = 2;
+  optional WorldExpression right = 3;
+}
+message WorldConstraint { optional int32 kind = 1; optional WorldExpression expression = 2; }   // kind 3 seen
+message WorldConstraints { repeated WorldConstraint constraints = 1; }
+message WorldSectionResponse {
+  repeated WorldItemLite world_items = 2;
+  optional WorldFilter world_filter = 4;   // echoes the request's filter: how a section's token finds its section
+  optional bool more_items = 5;
+  optional string pagination_token = 6;
+}
+message PaginatedWorldRequest {
+  optional RequestHeader request_header = 1;   // field 1, not 100 (live-verified)
+  repeated WorldSectionRequest world_section_requests = 2;
+  optional bool fetch_from_user_spaces = 5;
+  optional bool fetch_snippets_for_unnamed_rooms = 7;
+}
+message PaginatedWorldResponse {
+  repeated WorldSectionResponse world_section_responses = 1;
+  repeated WorldItemLite world_items = 4;
+  repeated ShortcutItem shortcut_items = 7;   // Home's threads (topics with replies), and shortcut messages, alone or in their topic
+}
+message ShortcutItem { oneof item { Topic topic = 1; Message message = 3; } }
+
+message UserStatus {
+  optional UserId user_id = 1;
+  optional DndSettings dnd_settings = 2;
+  optional bool presence_shared = 5;                  // false: appear away / presence hidden (medium)
+  optional CustomStatus custom_status = 6;
+}
+enum DndState { DND_STATE_UNKNOWN = 0; DND_STATE_AVAILABLE = 1; DND_STATE_DND = 2; }
+message DndSettings { optional DndState dnd_state = 1; }   // expiry (2) and remaining (3) not used
+message CustomStatus {                                // purple's status_emoji(2) string is gone
+  optional string status_text = 1;
+  optional int64 state_expiry_timestamp_usec = 3;
+  optional Emoji emoji = 4;
+}
+message GetSelfUserStatusRequest { optional RequestHeader request_header = 100; }
+message GetSelfUserStatusResponse { optional UserStatus user_status = 1; }
+
+// get_members: the current API uses field 2 both ways; purple's field 1 is absent.
+message MemberId { optional UserId user_id = 1; }                 // (oneof user_id / roster_id)
+message MembershipId {
+  optional MemberId member_id = 1;
+  optional GroupId group_id = 3;
+}
+message Member { optional User user = 1; }                         // (oneof user / roster)
+message MemberProfile {
+  optional MembershipId id = 1;
+  optional Member member = 2;
+}
+message GetMembersRequest {
+  repeated MembershipId membership_ids = 2;
+  optional RequestHeader request_header = 100;
+}
+message GetMembersResponse { repeated MemberProfile member_profiles = 2; }
+message ListMembersRequest {          // enum names unknown, raw values
+  repeated int32 member_types = 2;    // Google Chat's paginated sync sends [1, 5]
+  optional int32 page_size = 3;
+  optional string page_token = 4;
+  optional GroupId group_id = 5;
+  optional int32 membership_filter = 7;   // 4 for JOINED members
+  optional bool flag_8 = 8;               // always true from the paginated sync; meaning unknown
+  optional RequestHeader request_header = 100;
+}
+message ListMembersResponse {
+  repeated Member members = 2;
+  optional string next_page_token = 3;
+}
+
+message ListTopicsFilter { optional int64 older_than = 1; }   // oneof: PAGINATION_BACKWARDS anchor, µs sort time
+message ListTopicsRequest {
+  optional int32 page_size_for_topics = 2;
+  optional ListTopicsFilter filter = 4;
+  enum FetchOption { FETCH_OPTION_UNSPECIFIED = 0; USER = 1; TOTAL_MESSAGE_COUNTS = 2; READ_RECEIPTS = 3; TOPIC_METADATA = 4; }
+  repeated FetchOption fetch_options = 5;     // Google Chat always sends [TOPIC_METADATA]
+  optional int32 page_size_for_unread_replies = 6;
+  optional int32 page_size_for_read_replies = 7;
+  optional GroupId group_id = 8;
+  optional int32 field_11 = 11;   // 2, as Google Chat always sends it; without it the Ask Gemini DM fails (HTTP 500) under capabilities 6 + 17
+  optional RequestHeader request_header = 100;
+}
+message ListTopicsResponse {
+  repeated Topic topics = 1;
+  optional bool contains_first_topic = 4;     // true: nothing older
+  optional ReadReceiptSet read_receipt_set = 6;   // asked for with fetch option READ_RECEIPTS
+}
+
+/// The message a quote reply quotes, as Google Chat sends it.
+message QuotedMessageRef {
+  optional MessageId message_id = 1;
+  optional int64 last_update_time = 2;  // µs: the quoted message's Message.last_update_time
+  enum QuoteType { QUOTE_TYPE_UNSPECIFIED = 0; QUOTE_REPLY = 1; FORWARD = 2; SEND_TO_MAIN = 3; }
+  optional QuoteType quote_type = 4;
+}
+message MessageInfo {
+  optional bool accept_format_annotations = 1;
+  optional QuotedMessageRef quoted_message = 3;
+  optional UnsentMessageId unsent_message_id = 5;   // the server draft this send replaces; the server drops it
+}
+message CreateTopicRequest {
+  optional string text_body = 2;
+  repeated Annotation annotations = 3;        // zjg.f
+  optional GroupId group_id = 5;
+  optional string topic_and_message_id = 7;   // client-generated; also the topic id
+  optional bool history_v2 = 8;               // Google Chat always sends true
+  optional MessageInfo message_info = 9;      // Google Chat always sends
+  optional RequestHeader request_header = 100;
+}
+message CreateTopicResponse { optional Topic topic = 1; }
+
+// "Send a Meet link": the server makes a Meet meeting for the group and returns it as a ready VIDEO_CALL annotation,
+// which the client sends with an empty message.
+message CreateVideoCallRequest {
+  optional GroupId group_id = 1;
+  optional RequestHeader request_header = 100;
+}
+message CreateVideoCallResponse { optional Annotation annotation = 1; }
+
+message CreateMessageRequest {
+  optional MessageParentId parent_id = 1;
+  optional string text_body = 2;
+  repeated Annotation annotations = 3; // zjc.f
+  optional string message_id = 6;      // client-generated new message id
+  optional MessageInfo message_info = 7;   // zjc.h
+  optional RequestHeader request_header = 100;
+}
+message CreateMessageResponse { optional Message message = 1; }
+
+message MarkGroupReadstateRequest {    // (purple)
+  optional GroupId id = 1;
+  optional int64 last_read_time = 2;   // µs
+  optional RequestHeader request_header = 100;
+}
+message MarkGroupReadstateResponse {}
+
+// Sidebar actions: pin (star), mute, mark as unread, leave.
+message StarGroupRequest {
+  optional GroupId group_id = 1;
+  optional bool starred = 2;
+  optional RequestHeader request_header = 100;
+}
+message StarGroupResponse { optional GroupReadState read_state = 1; }   // user revision(2) not used
+message UpdateGroupNotificationSettingsRequest {
+  optional GroupId group_id = 1;
+  optional GroupNotificationSettings notification_settings = 2;
+  optional RequestHeader request_header = 100;
+}
+message UpdateGroupNotificationSettingsResponse { optional GroupNotificationSettings notification_settings = 1; }
+message SetMarkAsUnreadTimestampRequest {
+  optional GroupId group_id = 1;
+  optional int64 mark_as_unread_timestamp = 2;   // µs; 0 clears it
+  optional RequestHeader request_header = 100;
+}
+message SetMarkAsUnreadTimestampResponse {}
+message RemoveMembershipsRequest {
+  repeated MemberId member_ids = 1;
+  optional GroupId group_id = 2;
+  optional RequestHeader request_header = 100;
+}
+message RemoveMembershipResult { optional int32 failure_reason = 2; }   // set: refused
+message RemoveMembershipsResponse { repeated RemoveMembershipResult results = 1; }
+
+// --- Realtime stream ---
+message WriteRevision { optional int64 timestamp = 1; }   // µs
+message MessageEvent {
+  optional Message message = 1;
+  optional bool is_head = 6;                         // set by the server: the first message of its thread
+}
+message MessageDeletedEvent { optional MessageId message_id = 1; }
+// Conversations and reactions changed elsewhere.
+message Group { optional GroupId group_id = 1; }     // name(2), avatar_info(30) not used
+message GroupUpdatedEvent {
+  enum GroupUpdateType { GROUP_UPDATE_TYPE_UNKNOWN = 0; GROUP_CREATED = 1; GROUP_UPDATED = 2; GROUP_DELETED = 3; GROUP_UNDELETED = 4; }
+  optional Group group = 1;
+  optional GroupUpdateType group_update_type = 4;
+}
+message Membership {
+  enum State { MEMBER_UNKNOWN = 0; MEMBER_INVITED = 1; MEMBER_JOINED = 2; MEMBER_NOT_A_MEMBER = 3; MEMBER_FAILED = 4; MEMBER_INTEROP = 5; MEMBER_PENDING_TRUST_CHECK = 6; }
+  optional MembershipId id = 1;
+  optional State membership_state = 3;
+}
+message MembershipChangedEvent { optional Membership new_membership = 1; }
+message GroupDeletedEvent { repeated GroupId group_ids = 1; }
+message ReactionSummary {
+  optional Emoji emoji = 1;
+  repeated UserId reactors = 2;
+  optional int64 count = 3;
+  optional bool current_user_reacted = 4;
+}
+message MessageReactionEvent {                       // MESSAGE_REACTED: one person's reaction added or removed
+  optional MessageId message_id = 1;
+  optional Emoji emoji = 2;
+  optional UserId reactor = 3;
+  optional int64 update_timestamp = 4;
+  optional UpdateReactionRequest.Option option = 5;
+}
+message BatchReactionsUpdatedEvent {
+  optional MessageId message_id = 1;
+  repeated ReactionSummary reaction_summaries = 2;   // the message's whole reaction set
+}
+// --- Typing, presence and read receipts ---
+enum TypingState { TYPING_STATE_UNSPECIFIED = 0; TYPING_STATE_TYPING = 1; TYPING_STATE_STOPPED = 2; }
+message TypingContext {
+  oneof context {
+    GroupId group_id = 1;                             // the main composer
+    TopicId topic_id = 2;                             // a thread's reply box
+  }
+}
+message SetTypingStateRequest {                       // Google Chat only ever sends TYPING
+  optional TypingState state = 1;
+  optional TypingContext context = 2;
+  optional RequestHeader request_header = 100;
+}
+message SetTypingStateResponse {}                     // empty
+message ActivityIndicatorChangedEvent {               // sent every few seconds while an agent works, then once stopped
+  optional int32 state = 1;                           // 1 working, 2 stopped
+  optional UserId user_id = 2;
+  optional TypingContext context = 3;                 // the asker's thread
+  optional int64 timestamp_usec = 4;
+  message Progress { optional string text = 2; }      // "Assessing relevance", "Collecting info"…; empty: thinking
+  optional Progress progress = 5;
+}
+message TypingStateChangedEvent {                     // typing_progress(5) is for agents, not used
+  optional TypingState state = 1;
+  optional UserId user_id = 2;
+  optional TypingContext context = 3;
+  optional int64 start_timestamp_usec = 4;
+}
+message GroupSubscriptionEvent { repeated GroupId group_ids = 1; }   // the full set, not a delta
+message UserPresence {                                // purple's active_until(4) is gone
+  enum Presence { PRESENCE_UNDEFINED = 0; PRESENCE_ACTIVE = 1; PRESENCE_INACTIVE = 2; PRESENCE_3 = 3; PRESENCE_4 = 4; }   // 3, 4 read as inactive
+  optional UserId user_id = 1;
+  optional Presence presence = 2;
+  optional DndState dnd_state = 3;
+  optional UserStatus user_status = 5;
+}
+message GetUserPresenceRequest {                      // purple's fields 2/3 are absent
+  repeated UserId user_ids = 1;
+  optional RequestHeader request_header = 100;
+}
+message GetUserPresenceResponse { repeated UserPresence user_presences = 1; }
+message UserStatusUpdatedEvent { optional UserStatus user_status = 1; }
+message ReadReceipt {                                 // field 1 is absent
+  optional int64 last_read_timestamp_micros = 2;
+  optional User user = 3;
+}
+message ReadReceiptSet {
+  optional bool enabled = 1;
+  repeated ReadReceipt read_receipts = 2;
+}
+message ReadReceiptChangedEvent {
+  optional GroupId group_id = 1;
+  optional ReadReceiptSet read_receipt_set = 2;
+}
+message EventBody {
+  enum EventType {
+    UNKNOWN = 0;
+    GROUP_UPDATED = 5;
+    GROUP_NOTIFICATION_SETTINGS_UPDATED = 18;
+    MESSAGE_POSTED = 6;
+    MESSAGE_UPDATED = 7;
+    MESSAGE_DELETED = 8;
+    MEMBERSHIP_CHANGED = 15;
+    USER_STATUS_UPDATED_EVENT = 25;
+    TYPING_STATE_CHANGED = 29;
+    GROUP_DELETED = 30;
+    SESSION_READY = 33;
+    READ_RECEIPT_CHANGED = 36;
+    MESSAGE_REACTED = 24;
+    BATCH_REACTIONS_UPDATED = 58;
+    TOPIC_LABEL_APPLIED = 65;
+    TOPIC_LABEL_REMOVED = 66;
+    UNSENT_MESSAGE_CREATED = 87;
+    UNSENT_MESSAGE_DELETED = 88;
+    UNSENT_MESSAGE_UPDATED = 89;
+    ACTIVITY_INDICATOR_CHANGED = 96;                  // an agent (Ask Gemini) working on an answer
+  }
+  optional GroupUpdatedEvent group_updated = 5;
+  optional MessageEvent message_posted = 6;          // also carries MESSAGE_UPDATED
+  optional EventType event_type = 12;
+  optional GroupNotificationSettingsUpdatedEvent group_notification_settings_updated = 17;
+  optional MembershipChangedEvent membership_changed = 14;
+  optional MessageDeletedEvent message_deleted = 18;
+  optional UserStatusUpdatedEvent user_status_updated = 23;
+  optional TypingStateChangedEvent typing_state_changed = 26;
+  optional ActivityIndicatorChangedEvent activity_indicator_changed = 71;
+  optional GroupDeletedEvent group_deleted = 27;
+  optional ReadReceiptChangedEvent read_receipt_changed = 33;
+  optional MessageReactionEvent message_reaction = 22;
+  optional BatchReactionsUpdatedEvent batch_reactions_updated = 50;
+  optional TopicLabelEvent topic_label = 54;            // TOPIC_LABEL_APPLIED and TOPIC_LABEL_REMOVED
+  optional UnsentMessageEvent unsent_message = 67;      // UNSENT_MESSAGE_CREATED, _DELETED and _UPDATED
+}
+message GroupNotificationSettingsUpdatedEvent {
+  optional GroupId group_id = 1;
+  optional GroupNotificationSettings notification_settings = 2;
+}
+message TopicLabelEvent {
+  optional TopicId topic_id = 1;
+  optional TopicLabelId label = 2;
+}
+message Event {
+  optional GroupId group_id = 1;
+  optional WriteRevision user_revision = 6;
+  optional WriteRevision group_revision = 7;
+  repeated EventBody bodies = 8;                     // Google Chat: the only body source
+  optional WorldItemLite world_item_lite = 10;       // when sent, the changed conversation's sidebar item
+}
+message PingEvent {
+  enum State { STATE_UNSPECIFIED = 0; ACTIVE = 1; INACTIVE = 2; }
+  enum FocusState { FOCUS_UNSPECIFIED = 0; FOREGROUND = 1; BACKGROUND = 2; }
+  enum InteractiveState { INTERACTIVE_UNKNOWN = 0; INTERACTIVE = 1; FOCUSED = 2; VISIBLE = 3; HIDDEN = 4; }
+  optional State state = 1;
+  optional FocusState application_focus_state = 3;
+  optional InteractiveState client_interactive_state = 5;
+  optional bool client_notifications_enabled = 6;
+}
+message StreamEventsRequest {
+  optional PingEvent ping_event = 2;
+  optional int64 client_session_id = 6;
+  repeated string acks = 7;                          // sample ids
+  optional GroupSubscriptionEvent group_subscription_event = 8;   // typing is only pushed for these groups
+}
+message StreamEventsResponse {
+  optional Event event = 1;
+  optional string sample_id = 2;
+}
+message CatchUpRange {
+  optional int64 from_revision_timestamp = 1;
+  optional int64 to_revision_timestamp = 2;
+}
+message CatchUpUserRequest {
+  optional CatchUpRange range = 1;
+  optional int32 page_size = 2;
+  optional int32 cutoff_size = 3;
+  optional RequestHeader request_header = 100;
+}
+message CatchUpResponse {
+  enum Status {
+    STATUS_UNKNOWN = 0; COMPLETED = 1; PAGINATED = 2;
+    ABORTED_CUTOFF_EXCEEDED = 3; ABORTED_CACHE_INVALIDATION = 4; ABORTED_FROM_REVISION_TOO_OLD = 5;  // (purple)
+  }
+  repeated Event events = 1;
+  optional Status status = 2;
+}
+
+// --- Writes and search ---
+message EditMessageRequest {
+  optional MessageId message_id = 1;
+  optional string text_body = 2;
+  repeated Annotation annotations = 3;   // zkc.f
+  optional MessageInfo message_info = 5;
+  optional RequestHeader request_header = 100;
+}
+message EditMessageResponse { optional Message message = 1; }
+message DeleteMessageRequest {
+  optional MessageId message_id = 1;
+  optional RequestHeader request_header = 100;
+}
+message DeleteMessageResponse {}
+message UpdateReactionRequest {
+  enum Option { OPTION_UNSPECIFIED = 0; ADD = 1; REMOVE = 2; }
+  optional MessageId message_id = 1;
+  optional Emoji emoji = 2;
+  optional Option option = 3;
+  optional RequestHeader request_header = 100;
+}
+message UpdateReactionResponse {}
+message ListReactorsRequest {                       // who reacted with one emoji; no page token
+  optional MessageId message_id = 1;
+  optional Emoji emoji = 2;
+  optional int32 page_size = 3;                     // Google Chat sends 100
+  optional RequestHeader request_header = 100;
+}
+message ListReactorsResponse { repeated UserId reactors = 1; }   // revision(3), a Revision{timestampMicros}, not used
+message SearchFilter {}
+message SearchMessagesV2Request {
+  optional int32 size = 1;
+  optional string cursor = 2;
+  optional SearchFilter filter = 3;    // always sent, empty when unfiltered
+  optional string query = 4;
+  optional RequestHeader request_header = 100;
+}
+message SearchResult { optional Message message = 1; }
+message SearchResults { repeated SearchResult items = 1; }
+message SearchMessagesV2Response {
+  optional string cursor = 1;          // present: more pages
+  optional SearchResults results = 3;
+}
+
+// --- Thread replies paging ---
+message ListMessagesFilter { optional int64 older_than = 3; }   // µs create_time of the oldest reply held; 2^53−1 = newest
+message ListMessagesRequest {
+  optional MessageParentId parent_id = 1;
+  optional int32 page_size = 2;
+  optional ListMessagesFilter filter = 4;
+  optional RequestHeader request_header = 100;
+}
+message ListMessagesResponse {
+  repeated Message messages = 1;
+  optional bool contains_first_message = 3;   // true: no older replies
+}
+
+// --- New conversations: DMs, the space directory, joining ---
+message RetentionSettings { optional int32 state = 1; }   // 1 PERMANENT, 2 EPHEMERAL_ONE_DAY
+message CreateDmRequest {                     // purple's members(1) / invitees(7) layout is gone
+  repeated InviteeInfo members = 3;           // the other people: user_id, or email with invitation_mode
+  optional RetentionSettings retention_settings = 5;
+  optional bool flag_8 = 8;                   // the official clients send false; meaning unknown
+  optional int32 space_origin = 9;            // where the chat was started; 12 = SUGGESTED_CONTACT (web sends it), 1 = HOVERCARD
+  optional RequestHeader request_header = 100;
+}
+message CreateDmResponse { optional Group dm = 1; }   // also the reply to create_dm_extended
+// create_group, as web Chat starts a chat with two or more people: a new unnamed FLAT_ROOM, the group DM.
+message SpaceInvitee {
+  optional InviteeInfo invitee = 1;
+  optional int32 field_4 = 4;                 // web sends 1; meaning unknown
+  optional int32 field_5 = 5;                 // web sends 1; meaning unknown
+}
+message SpaceCreationOptions { repeated int32 values = 1; }   // web sends [0]
+message SpaceCreationInfo {
+  optional string name = 1;                   // empty for a group DM
+  repeated SpaceInvitee invitees = 8;
+  optional SpaceCreationOptions options = 9;
+  optional AvatarInfo avatar_info = 10;       // sent empty for a group DM
+  optional int32 group_type = 13;             // 4 FLAT_ROOM (a group DM), 5 THREADED_ROOM
+  optional bool field_15 = 15;                // web sends false
+  optional bool field_17 = 17;                // web sends false
+}
+message CreateGroupRequest {
+  optional SpaceCreationInfo space = 1;
+  optional string local_id = 3;               // 11 base64url characters, like a client message id
+  optional bool should_find_existing_space = 4;   // true: the same people get their existing group DM back
+  optional int32 space_origin = 6;            // web sends 9 (HUMAN)
+  optional RequestHeader request_header = 100;
+}
+message CreateGroupResponse { optional Group group = 1; }
+message SearchSpaceDirectoryRequest {
+  optional int32 page_size = 1;
+  optional string continuation_token = 2;
+  optional string query = 5;
+  optional bool flag_9 = 9;                   // Google Chat always sends false; meaning unknown
+  optional RequestHeader request_header = 100;
+}
+message SpaceMemberCount {
+  optional int32 count = 1;
+  optional int32 member_type = 2;             // 1 = people, 2 = groups
+  optional Membership.State membership_state = 3;
+}
+message SpaceMemberCounts { repeated SpaceMemberCount counts = 1; }
+message SpaceDirectoryEntry {
+  optional GroupId group_id = 1;
+  optional string name = 2;
+  optional string description = 3;
+  optional AvatarInfo avatar_info = 4;        // oneof with avatar_url(7)
+  optional Membership.State membership_state = 6;   // mine
+  optional string avatar_url = 7;
+  optional SpaceMemberCounts member_counts = 10;
+}
+message SearchSpaceDirectoryResponse {
+  optional string continuation_token = 1;     // set while more pages exist
+  repeated SpaceDirectoryEntry spaces = 2;
+}
+message CreateMembershipRequest {
+  repeated MemberId member_ids = 2;
+  optional Membership.State membership_state = 3;
+  optional GroupId group_id = 4;
+  optional RequestHeader request_header = 100;
+}
+message CreateMembershipResult {
+  optional Membership membership = 1;
+  optional int32 failure_reason = 2;          // set: this membership was refused
+}
+message CreateMembershipResponse { repeated CreateMembershipResult results = 2; }
+
+// --- Shared media, files and links (list_attachments) ---
+// What Google Chat's Shared panel lists, without loading the history. Categories are sent in their legacy numbers.
+enum AttachmentCategory {
+  ATTACHMENT_CATEGORY_UNKNOWN = 0;
+  ATTACHMENT_CATEGORY_MEDIA = 1;
+  ATTACHMENT_CATEGORY_FILE = 2;
+  ATTACHMENT_CATEGORY_LINK = 3;
+  ATTACHMENT_CATEGORY_ALL = 4;
+  ATTACHMENT_CATEGORY_MEDIA_LEGACY = 5;
+  ATTACHMENT_CATEGORY_FILE_LEGACY = 6;
+}
+message AttachmentFilter {
+  repeated int32 media_types = 1;             // IMAGE 1, VIDEO 2; media only
+  optional bool include_inline_replies = 2;
+  optional bool include_infected_assets = 3;
+  optional string topic_id = 4;               // one thread only
+  optional bool field6 = 6;                   // always true
+}
+message ListAttachmentsRequest {
+  optional GroupId group_id = 1;
+  optional AttachmentFilter filter = 2;
+  optional int32 direction = 3;               // 1 older than the anchor, 2 newer
+  optional int32 page_size = 4;
+  optional MessageId anchor = 5;              // the last item's message, to page on from it
+  optional bool include_anchor = 6;           // true without an anchor
+  repeated AttachmentCategory categories = 7 [packed = true];
+  optional RequestHeader request_header = 100;
+}
+message AttachmentItem {
+  optional Annotation annotation = 1;
+  optional MessageId message_id = 3;
+  optional int64 create_time = 4;             // µs
+  optional UserId creator = 5;
+  optional int64 update_time = 6;             // µs
+}
+message AttachmentCategoryResult {
+  optional AttachmentCategory category = 1;
+  repeated AttachmentItem items = 2;
+}
+message ListAttachmentsResponse { repeated AttachmentCategoryResult results = 2; }
+
+// Server drafts (and scheduled sends) are unsent messages. These four RPCs carry the header at field 1, not 100.
+message Timestamp { optional int64 seconds = 1; optional int32 nanos = 2; }
+message UnsentMessageId {
+  optional string id = 1;              // client-chosen, like a message id
+  optional GroupId group_id = 2;
+  optional string topic_id = 3;        // a thread reply's draft
+}
+message UnsentMessage {
+  enum Type { TYPE_UNSPECIFIED = 0; SCHEDULED = 1; DRAFT = 2; }
+  optional UnsentMessageId id = 1;
+  optional Timestamp create_time = 2;
+  optional Timestamp update_time = 3;
+  optional string text_body = 4;
+  repeated Annotation annotations = 5;
+  optional Type type = 7;              // sent on create only
+  optional string mutation_id = 9;     // a new uppercase UUID per write
+}
+message FieldMask { repeated int32 fields = 2 [packed = true]; }   // UnsentMessage field numbers
+message CreateUnsentMessageRequest {
+  optional RequestHeader request_header = 1;
+  optional UnsentMessage unsent_message = 2;
+}
+message CreateUnsentMessageResponse { optional UnsentMessage unsent_message = 1; }   // revision(2) not used
+message UpdateUnsentMessageRequest {
+  optional RequestHeader request_header = 1;
+  optional UnsentMessage unsent_message = 2;
+  optional FieldMask update_mask = 3;
+}
+message UpdateUnsentMessageResponse { optional UnsentMessage unsent_message = 1; }
+message DeleteUnsentMessageRequest {
+  optional RequestHeader request_header = 1;
+  optional UnsentMessageId id = 2;
+}
+message DeleteUnsentMessageResponse {}
+message ListUnsentMessagesRequest {
+  message Paging { optional string page_token = 6; }
+  message Filter {
+    optional UnsentMessage.Type type = 3;
+    optional int32 scope = 5;          // 0 with DRAFT, 1 with SCHEDULED, as Google Chat sends them
+  }
+  optional RequestHeader request_header = 1;
+  optional Paging paging = 2;          // sent empty for the first page
+  optional Filter filter = 3;
+}
+message ListUnsentMessagesResponse {
+  repeated UnsentMessage unsent_messages = 1;
+  optional string next_page_token = 3;
+}
+message UnsentMessageEvent { optional UnsentMessage unsent_message = 1; }
+
+// --- Cards (app and integration messages), read-only. Dynamite's own field numbers, as Google Chat sends them to a
+// client declaring web's capabilities; only what Parley renders is listed.
+message AppAttachment {
+  optional Card card = 7;
+  optional string attachment_id = 8;          // "accessory_actions" on Ask Gemini's feedback row
+  optional User app = 6;                       // the app that made the card (its user id only), as on a link an app previews
+}
+message Card {
+  optional CardHeader header = 1;
+  repeated CardSection sections = 2;
+}
+message CardHeader { optional FormattedText title = 1; optional FormattedText subtitle = 2; }
+message CardSection {
+  optional string header = 1;
+  repeated CardWidget widgets = 2;
+}
+message CardWidget {
+  optional TextParagraph text_paragraph = 3;
+  repeated CardButton buttons = 8;             // a button list (outside the widget oneof)
+  optional DecoratedText decorated_text = 13;
+  optional CardImage image = 9;
+  optional CardDivider divider = 16;
+  optional CardColumns columns = 18;
+  optional TextInput text_input = 11;          // a text field whose value a button's action sends (a Drive comment's Reply)
+}
+message TextInput { optional string name = 1; optional string label = 3; optional string value = 4; }
+/// A button's action as an app's card carries it (`CardOnClick.action`), only what Parley reads.
+message CardAction {
+  optional string function = 1;
+  optional int32 interaction = 8;              // 1: opens a dialog (Google Chat draws it; Parley opens the message there)
+}
+/// click_card: a card button's action sent back to its app with the card's input values, as Google Chat sends it.
+message ClickCardRequest {
+  optional MessageId message_id = 1;
+  optional bytes action = 2;                   // the button's action, as the card carried it
+  repeated FormInput form_inputs = 3;          // every input in the card, empty ones too
+  optional string field_4 = 4;                 // "", as Google Chat sends it
+  optional RequestHeader request_header = 100;
+}
+message FormInput { optional string name = 1; optional string value = 2; optional int32 field_4 = 4; }   // 4: 1, as Google Chat sends it
+message ClickCardResponse {
+  optional int32 field_1 = 1;                  // 1 when the app answered with the updated message
+  optional Message message = 2;                // the message, its card updated
+}
+message CardImage {
+  optional string image_url = 1;
+  optional CardOnClick on_click = 2;
+  optional double aspect_ratio = 3;
+  optional string alt_text = 4;
+}
+message CardDivider {}
+message TextParagraph { optional FormattedText text = 1; optional int32 max_lines = 2; }   // max_lines: shown cut to that many, as a link preview asks
+message DecoratedText {
+  optional string start_icon_url = 1;          // legacy copy of icon.url
+  optional FormattedText top_label = 2;
+  optional FormattedText text = 3;
+  optional FormattedText bottom_label = 4;
+  optional CardOnClick on_click = 5;           // the whole row
+  optional bool wrap_text = 8;                 // false (or absent): the text stays on one line, cut with "…"
+  optional int32 start_icon_image_type = 10;   // 2: round (an avatar)
+  optional CardIcon icon = 11;
+}
+message CardIcon {
+  optional string url = 1;
+  optional int32 image_type = 3;               // 1 square, 2 round
+}
+message CardColumns { repeated CardColumn columns = 2; }
+message CardColumn { optional int32 horizontal_alignment = 2; repeated CardColumnWidget widgets = 4; }   // alignment: 1 start, 2 center, 3 end
+message CardColumnWidget {
+  optional DecoratedText decorated_text = 3;
+  optional TextParagraph text_paragraph = 6;
+  repeated CardButton buttons = 7;
+}
+message CardButton { optional TextButton text_button = 1; }
+message TextButton { optional FormattedText label = 1; optional CardOnClick on_click = 2; optional int32 type = 5; }   // type: 1 outlined, 2 filled, 3 filled tonal, 4 borderless
+message CardOnClick {
+  optional bytes action = 2;                   // a form action sent back to the app: not available read-only
+  optional OpenLink open_link = 5;
+}
+message OpenLink {
+  optional string url = 1;                     // a google.com redirect
+  optional string original_url = 5;            // the target itself
+}
+/// Card text: an HTML string and the same text as runs.
+message FormattedText {
+  optional string html = 1;
+  repeated TextSegment segments = 2;
+}
+message TextSegment {
+  optional TextRun run = 1;
+  optional TextLink link = 2;
+}
+message TextRun {
+  optional string text = 1;
+  enum Style { NONE = 0; BOLD_DEPRECATED = 1; ITALIC = 2; UNDERLINE = 3; STRIKETHROUGH = 4; BR = 5; UPPERCASE = 6; CODE = 7; CODE_BLOCK = 8; }
+  repeated Style styles = 2;
+  optional int32 weight = 5;                   // 2: bold
+  optional ColorPair color_pair = 7;           // the run's colour, light and dark themes
+}
+message Translation {
+  optional string text = 1;
+  repeated Annotation annotations = 2;         // over `text`
+  optional string source_language = 3;         // a language tag ("es")
+  optional string target_language = 4;
+}
+message ColorPair { optional uint32 light = 1; optional uint32 dark = 2; }   // 0xRRGGBB
+message TextLink {
+  optional string href = 1;                    // a google.com redirect for web links, or mailto:
+  optional string text = 2;
+  optional string original_href = 3;
+}
+/// VIDEO_CALL annotation data on a Google Meet link.
+message VideoCallMetadata {
+  optional MeetingSpace meeting_space = 1;
+  message MeetingSpace {
+    optional string name = 1;
+    optional string code = 2;                 // the meeting code, xxx-xxxx-xxx
+    optional string url = 3;
+  }
+}
+/// GSUITE_INTEGRATION annotation data; a Google Meet call is field 6.
+message GsuiteIntegrationMetadata {
+  optional int32 integration_type = 1;        // 1 Meet, 2 Tasks, 3 Calendar
+  optional TasksMetadata tasks = 3;
+  optional CalendarEventMetadata calendar = 4;
+  optional MeetCallMetadata meet_call = 6;
+}
+message TasksMetadata {
+  message Task { optional string title = 1; }
+  optional Task task = 4;
+}
+message CalendarEventMetadata {
+  message Event { optional string first = 1; optional string second = 2; }   // the event's title and its link, in either order
+  optional Event event = 1;
+}
+message BotResponse {
+  optional int32 type = 1;
+  optional int32 required_action = 3;
+  optional string setup_url = 4;              // where to configure the app, when it needs it
+  optional User bot = 5;
+}
+message Tombstone { optional bool is_tombstone = 1; }
+message TombstoneMetadata { optional int32 type = 1; }   // 1 its sender, 2 a space manager, 3 an admin, 4 expired, 5–7 via an app or a member
+message PrivateMessageViewer { optional UserId viewer = 1; }
+message MeetCallMetadata {
+  message Meeting { message Link { optional string url = 2; optional int32 kind = 3; } optional Link link = 1; }   // kind 1 a huddle, 2 a call
+  optional Meeting meeting = 1;
+  enum Status { CALL_STATUS_UNSPECIFIED = 0; CALL_STARTED = 1; CALL_MISSED = 2; CALL_ENDED = 3; }
+  optional Status status = 2;
+}
