@@ -417,7 +417,7 @@
 				CODE_SIGN_ENTITLEMENTS = Parley/Parley.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 53;
+				CURRENT_PROJECT_VERSION = 54;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Parley/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Parley;
@@ -426,7 +426,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.5.1;
+				MARKETING_VERSION = 1.5.2;
 				PRODUCT_BUNDLE_IDENTIFIER = dev.cuza.Parley;
 				SDKROOT = macosx;
 			};
@@ -518,7 +518,7 @@
 				CODE_SIGN_ENTITLEMENTS = Parley/Parley.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 53;
+				CURRENT_PROJECT_VERSION = 54;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Parley/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Parley;
@@ -527,7 +527,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.5.1;
+				MARKETING_VERSION = 1.5.2;
 				PRODUCT_BUNDLE_IDENTIFIER = dev.cuza.Parley;
 				SDKROOT = macosx;
 			};
