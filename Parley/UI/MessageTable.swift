@@ -131,10 +131,6 @@ struct MessageTable: NSViewRepresentable {
             }
             let offset = prepended ? newIDs.count - oldIDs.count : 0
             if prepended { prefetchThumbnails(new[..<offset]) }
-            // NSTableView animates height changes from `noteHeightOfRows` (~0.25 s) while the scroll position is already
-            // final: rows slide and settle, a wiggle when a receipt moves. Apply them at once, as Telegram does.
-            NSAnimationContext.beginGrouping(); NSAnimationContext.current.duration = 0
-            defer { NSAnimationContext.endGrouping() }
             table.beginUpdates()
             if prepended, offset > 0 { table.insertRows(at: IndexSet(integersIn: 0..<offset), withAnimation: []) }
             else if new.count > old.count { table.insertRows(at: IndexSet(integersIn: old.count..<new.count), withAnimation: []) }
@@ -143,8 +139,8 @@ struct MessageTable: NSViewRepresentable {
             table.endUpdates()
             changed.forEach(configureRow)
         }
-        /// Runs a change, then puts the first visible row back where it was, or stays at the bottom if the reader was there.
-        /// The row is found again by id.
+        /// Runs a change, then puts the first row wholly in view back where it was, or stays at the bottom if the reader was
+        /// there. The row is found again by id.
         private func keepingPlace(toBottom: Bool = false, _ change: () -> Void) {
             // Re-measuring resizes the table, whose frame change re-enters here mid-update; only the outermost call,
             // which saw the state before any of it, decides where the reader ends up.
@@ -153,9 +149,16 @@ struct MessageTable: NSViewRepresentable {
             defer { keeping = false }
             let visible = scroll.contentView.bounds
             let atBottom = toBottom || pinnedToBottom
-            let first = table.rows(in: visible).location
+            // Not the row cut off at the top: when it re-wraps (a resize), every row below would move by its change.
+            let inView = table.rows(in: uncovered), top = uncovered.minY
+            let first = (inView.location..<inView.location + inView.length).first { table.rect(ofRow: $0).minY >= top } ?? inView.location
             let anchor = first < rows.count ? (id: rows[first].id, offset: table.rect(ofRow: first).minY - visible.minY) : nil
+            // NSTableView animates height changes from `noteHeightOfRows` (~0.25 s) while the scroll position below is
+            // already final: rows slide and settle (a wiggle when a receipt moves, every row after a resize). Apply them
+            // at once, as Telegram does.
+            NSAnimationContext.beginGrouping(); NSAnimationContext.current.duration = 0
             change()
+            NSAnimationContext.endGrouping()
             table.tile()   // out of Auto Layout (see makeScrollView), the table resizes to its rows only when tiled
             table.layoutSubtreeIfNeeded()
             var target: CGFloat

@@ -147,6 +147,57 @@ import Testing
             }
         }
     }
+    /// Hosted as in the app: the window is resized step by step (narrower, then wider), as a drag (live: rows in view
+    /// re-measured per step, everything at the end) or as programmatic frames (every row per step). Rows must not move
+    /// on screen for no reason: a reader at the bottom keeps the newest message just above the composer, and a reader
+    /// scrolled up keeps the first message fully in view at the same height, at every step and after the end, with
+    /// no row sliding into place afterwards.
+    private func resizeKeepsTheReadersPlace(live: Bool, scrolledUp: Bool, offset: CGFloat = 0) throws {
+        let coordinator = MessageTable.Coordinator()
+        let rows = TimelineRow.rows(messages(0..<120))
+        let host = NSHostingView(rootView: MessageTableHost(coordinator: coordinator, table: MessageTable(rows: rows, meID: "me", kind: .space,
+            actions: MessageRowActions(), nearTop: {}, bottomInset: 60)))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 600), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        window.contentView = host
+        func settle() { host.layoutSubtreeIfNeeded(); window.displayIfNeeded() }
+        settle()
+        let scroll = try #require(coordinator.scroll), table = try #require(coordinator.table)
+        func clip() -> NSRect { scroll.contentView.bounds }
+        if scrolledUp { scroll.contentView.scroll(to: NSPoint(x: 0, y: table.bounds.height / 2 + offset)); scroll.reflectScrolledClipView(scroll.contentView); settle() }
+        // The first row wholly in view (the composer covers the bottom), and how far below the top of the view it is.
+        let visible = table.rows(in: clip())
+        let anchor = try #require((visible.location..<visible.location + visible.length).first { table.rect(ofRow: $0).minY >= clip().minY })
+        let id = rows[anchor].id, onScreen = table.rect(ofRow: anchor).minY - clip().minY
+        func check(_ step: String) {
+            func keys(_ v: NSView) -> [String] { (v.layer?.animationKeys() ?? []) + v.subviews.flatMap(keys) }
+            let animating = (0..<table.numberOfRows).filter { table.rowView(atRow: $0, makeIfNecessary: false).map(keys)?.isEmpty == false }
+            #expect(animating.isEmpty, "offset \(offset) \(step): rows animating into place: \(animating)")
+            let misplaced = (0..<table.numberOfRows).filter { i in table.rowView(atRow: i, makeIfNecessary: false).map { $0.frame != table.rect(ofRow: i) } ?? false }
+            #expect(misplaced.isEmpty, "\(step): row views away from their rows: \(misplaced)")
+            if scrolledUp {
+                let index = coordinator.rows.firstIndex { $0.id == id }!
+                let y = table.rect(ofRow: index).minY - clip().minY
+                #expect(abs(y - onScreen) <= 1, "offset \(offset) \(step): the reader's message moved from \(onScreen) to \(y) pt below the top")
+            } else {
+                let gap = clip().maxY - scroll.contentInsets.bottom - table.rect(ofRow: table.numberOfRows - 1).maxY
+                #expect(abs(gap) <= 1, "\(step): the newest message ends \(gap) pt from the composer")
+            }
+        }
+        if live { coordinator.resizing = true }   // as during a drag (AppKit's `inLiveResize` can't be faked here)
+        for width in Array(stride(from: 780, through: 400, by: -20)) + Array(stride(from: 420, through: 900, by: 20)) {
+            window.setContentSize(NSSize(width: CGFloat(width), height: 600)); settle()
+            check("width \(width)")
+        }
+        if live { NotificationCenter.default.post(name: NSWindow.didEndLiveResizeNotification, object: window); settle() }
+        check("after the resize")
+    }
+    @Test func aDragResizeKeepsTheNewestMessageAboveTheComposer() throws { try resizeKeepsTheReadersPlace(live: true, scrolledUp: false) }
+    /// Offsets across a few rows, so that the row cut off at the top is sometimes a long one that re-wraps.
+    @Test(arguments: stride(from: 0, through: 160, by: 20).map { CGFloat($0) })
+    func aDragResizeKeepsAReaderScrolledUpInPlace(offset: CGFloat) throws { try resizeKeepsTheReadersPlace(live: true, scrolledUp: true, offset: offset) }
+    @Test func aProgrammaticResizeKeepsTheNewestMessageAboveTheComposer() throws { try resizeKeepsTheReadersPlace(live: false, scrolledUp: false) }
+    @Test(arguments: stride(from: 0, through: 160, by: 20).map { CGFloat($0) })
+    func aProgrammaticResizeKeepsAReaderScrolledUpInPlace(offset: CGFloat) throws { try resizeKeepsTheReadersPlace(live: false, scrolledUp: true, offset: offset) }
     /// An animated resize (a pane opening grows the window, the zoom button) counts as a live resize while it runs but
     /// never posts its end: the rows must still end up measured for the final width.
     @Test func anAnimatedResizeEndsWithEveryRowMeasured() async throws {
