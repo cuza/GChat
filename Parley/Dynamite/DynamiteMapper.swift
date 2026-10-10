@@ -544,9 +544,18 @@ enum DynamiteMapper {
         return lines.isEmpty ? nil : lines.joined(separator: "\n")
     }
 
-    /// A pushed BATCH_REACTIONS_UPDATED: the message's whole reaction set.
-    static func reactions(_ summaries: [Dynamite_ReactionSummary], selfID: String) -> [Reaction] {
-        summaries.compactMap { reaction($0.emoji, count: Int($0.count), mine: $0.currentUserReacted, reactors: $0.reactors.map(\.id), selfID: selfID) }
+    /// A pushed BATCH_REACTIONS_UPDATED, applied onto the message's `existing` reactions: it names only the emoji that changed,
+    /// each replacing its own reaction (gone at count 0); the others stay as they are.
+    static func reactions(_ summaries: [Dynamite_ReactionSummary], onto existing: [Reaction] = [], selfID: String) -> [Reaction] {
+        var reactions = existing
+        for summary in summaries {
+            guard let (text, custom) = reactionKey(summary.emoji) else { continue }
+            let changed = reaction(summary.emoji, count: Int(summary.count), mine: summary.currentUserReacted, reactors: summary.reactors.map(\.id), selfID: selfID)
+            if let index = reactions.firstIndex(where: { $0.emoji == text && $0.custom?.id == custom?.id }) {
+                if let changed { reactions[index] = changed } else { reactions.remove(at: index) }
+            } else if let changed { reactions.append(changed) }
+        }
+        return reactions
     }
     // ponytail: Domain Reaction stores people; the wire gives a count, the own flag and (pushed) the reactors it lists.
     // Filler IDs keep the count. Use real reactors everywhere when reaction details are fetched.

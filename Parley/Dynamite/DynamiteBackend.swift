@@ -488,7 +488,7 @@ actor DynamiteBackend: ChatBackend {
             r.option = present ? .add : .remove
         }
         let _: Dynamite_UpdateReactionResponse = try await rpc("update_reaction", request)
-        // Shown now; the server's BATCH_REACTIONS_UPDATED that follows carries the same set.
+        // Shown now; the server's BATCH_REACTIONS_UPDATED that follows re-sends this emoji's count.
         update(id) { [selfID] in $0.reactions = Self.toggled($0.reactions, emoji, custom, by: selfID, present: present) }
     }
     /// `list_reactors` as Google Chat's reactor list sends it: one emoji, 100 people, no paging.
@@ -505,13 +505,15 @@ actor DynamiteBackend: ChatBackend {
         return ids.map { people[$0] ?? Person(id: $0, name: "Unknown") }
     }
     /// Changes a loaded head or reply and emits it; a message Parley never loaded is left alone.
+    /// A thread loaded on its own (opened from Home) holds its replies without its head: its id is the topic's.
     private func update(_ id: MessageID, _ change: (inout Message) -> Void) {
         let topic = Self.topicKey(id)
+        let headID = heads[topic]?.id ?? topic + "/" + (topic.split(separator: "/").last ?? "")
         if var head = heads[topic], head.id == id {
             change(&head)
             heads[topic] = head
             continuation.yield(.messageUpserted(head))
-        } else if let headID = heads[topic]?.id, let index = threads[headID]?.firstIndex(where: { $0.id == id }), var reply = threads[headID]?[index] {
+        } else if let index = threads[headID]?.firstIndex(where: { $0.id == id }), var reply = threads[headID]?[index] {
             change(&reply)
             threads[headID]?[index] = reply
             continuation.yield(.messageUpserted(reply))
@@ -886,8 +888,10 @@ actor DynamiteBackend: ChatBackend {
                 let id = body.batchReactionsUpdated.messageID
                 guard !id.messageID.isEmpty,
                       let conversation = DynamiteID.conversation(event.groupID) ?? DynamiteID.conversation(id.parentID.topicID.groupID) else { continue }
-                let reactions = DynamiteMapper.reactions(body.batchReactionsUpdated.reactionSummaries, selfID: selfID)
-                update(DynamiteID.message(conversation, topic: id.parentID.topicID.topicID, message: id.messageID)) { $0.reactions = reactions }
+                let summaries = body.batchReactionsUpdated.reactionSummaries
+                update(DynamiteID.message(conversation, topic: id.parentID.topicID.topicID, message: id.messageID)) { [selfID] in
+                    $0.reactions = DynamiteMapper.reactions(summaries, onto: $0.reactions, selfID: selfID)
+                }
             case .typingStateChanged:
                 let typing = body.typingStateChanged, topic = typing.context.topicID
                 guard !typing.userID.id.isEmpty, typing.userID.id != selfID,   // Google Chat drops its own

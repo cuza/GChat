@@ -38,14 +38,14 @@ extension AuthTests {
             }]
         }
     }
-    @Test func pushedReactionsReplaceALoadedMessagesReactions() async throws {
+    @Test func pushedReactionsReplaceALoadedMessagesReactionsByEmoji() async throws {
         let (backend, _) = try await Self.connected()
         await backend.handle(Self.pushed(.messagePosted, Self.message("h1", topic: "t1", at: 1)))
         await backend.handle(Self.pushed(.messagePosted, Self.message("r1", topic: "t1", at: 2)))
         let thumbs = Dynamite_ReactionSummary.with { s in s.emoji.unicode = "👍"; s.count = 1; s.reactors = [.with { $0.id = "u1" }] }
         await backend.handle(Self.reactionsPushed(("t1", "h1"), [thumbs]))
         await backend.handle(Self.reactionsPushed(("t1", "r1"), [thumbs]))
-        await backend.handle(Self.reactionsPushed(("t1", "h1"), []))   // everyone took theirs back
+        await backend.handle(Self.reactionsPushed(("t1", "h1"), [.with { $0.emoji.unicode = "👍"; $0.count = 0 }]))   // everyone took theirs back
         let messages = Self.upserts(await Self.drain(backend)).dropFirst(3)   // h1, r1, and h1's reply count
         #expect(messages.map(\.id) == ["space/x/t1/h1", "space/x/t1/r1", "space/x/t1/h1"])
         #expect(messages.map(\.reactions) == [[Reaction(emoji: "👍", people: ["u1"])], [Reaction(emoji: "👍", people: ["u1"])], []])
@@ -366,5 +366,35 @@ struct LateUpsertTests {
         await fake.setReaction("✨", custom: nil, on: "d2", present: false)   // the reaction changed: looked up again
         #expect(await store.reactorsLine(Reaction(emoji: "✨", people: ["alex"]), on: "d2") == "Alex Rivera")
         #expect(await fake.reactorRequests == 2)
+    }
+}
+
+/// My own reactions: shown as soon as the server accepts them, and kept by the summaries it pushes after.
+extension AuthTests {
+    private static func summary(_ emoji: String, count: Int64, mine: Bool = false) -> Dynamite_ReactionSummary {
+        .with { $0.emoji.unicode = emoji; $0.count = count; $0.currentUserReacted = mine }
+    }
+    /// A pushed summary names only the emoji that changed: a second reaction keeps the first.
+    @Test func aSecondReactionKeepsTheFirst() async throws {
+        let (backend, _) = try await Self.connected([try Self.proto(Dynamite_UpdateReactionResponse())])
+        var head = Self.message("h1", topic: "t1", at: 1)
+        head.reactions = [.with { $0.emoji.unicode = "👍"; $0.count = 1; $0.currentUserReacted = true }]
+        await backend.handle(Self.pushed(.messagePosted, head))
+        try await backend.setReaction("🎉", custom: nil, on: "space/x/t1/h1", present: true)
+        await backend.handle(Self.reactionsPushed(("t1", "h1"), [Self.summary("🎉", count: 1, mine: true)]))
+        let upserts = Self.upserts(await Self.drain(backend)).filter { $0.id == "space/x/t1/h1" }
+        #expect(upserts.dropFirst().map { $0.reactions.map(\.emoji) } == [["👍", "🎉"], ["👍", "🎉"]])
+        #expect(upserts.last?.reactions.allSatisfy { $0.people == ["me"] } == true)
+    }
+    /// A reply in a thread opened from Home, whose conversation was never loaded: my reaction shows, and so do pushed ones.
+    @Test func aReactionToAReplyInAThreadLoadedOnItsOwnShows() async throws {
+        let replies = Dynamite_ListMessagesResponse.with { $0.messages = [Self.message("r1", topic: "t1", at: 2)]; $0.containsFirstMessage = true }
+        let (backend, _) = try await Self.connected([try Self.proto(replies), try Self.proto(Dynamite_UpdateReactionResponse())])
+        _ = try await backend.messages(in: "space/x", thread: "space/x/t1/t1", before: nil)
+        try await backend.setReaction("👍", custom: nil, on: "space/x/t1/r1", present: true)
+        await backend.handle(Self.reactionsPushed(("t1", "r1"), [Self.summary("🎉", count: 1)]))
+        let upserts = Self.upserts(await Self.drain(backend)).filter { $0.id == "space/x/t1/r1" }
+        #expect(upserts.map { $0.reactions.map(\.emoji) } == [["👍"], ["👍", "🎉"]])
+        #expect(upserts.allSatisfy { $0.threadID == "space/x/t1/t1" })
     }
 }
